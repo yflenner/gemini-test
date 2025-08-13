@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gemini Chat – Alpine.js + Tailwind (Single File)</title>
+  <!-- Heebo font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Tailwind via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Alpine.js -->
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    :root { --gradient-from: #8b5cf6; --gradient-via: #3b82f6; --gradient-to: #ec4899; }
+    html, body { height: 100%; }
+    body { font-family: 'Heebo', system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  </style>
+</head>
+<body class="h-full bg-gray-100 text-gray-900">
+  <div class="min-h-full flex flex-col items-center px-4 py-6 w-full md:w-10/12 lg:w-8/12 xl:w-7/12 mx-auto" x-data="chatApp()" x-init="init()">
+    <!-- Header -->
+    <header class="w-full">
+      <div class="rounded-2xl p-5 shadow-sm bg-white/80 backdrop-blur border border-gray-200">
+        <h1 class="text-2xl md:text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-[var(--gradient-from)] via-[var(--gradient-via)] to-[var(--gradient-to)]">Gemini Chat – Alpine.js + Tailwind</h1>
+        <p class="text-sm text-gray-600 mt-1">Single-file demo. Paste your Google AI Studio API key, type a prompt, and get answers.</p>
+
+        <!-- Settings row -->
+        <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <label class="flex flex-col text-sm">
+            <span class="mb-1 text-gray-700">Google API Key</span>
+            <input type="password" x-model="apiKey" @change="persist()" placeholder="AIza..." class="px-3 py-2 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+            <button type="button" class="self-start mt-1 text-xs text-indigo-600 hover:underline" @click="reveal = !reveal">Toggle view</button>
+            <template x-if="reveal">
+              <span class="text-xs text-gray-500 break-all mt-1" x-text="apiKey || '—' "></span>
+            </template>
+          </label>
+          <label class="flex flex-col text-sm">
+            <span class="mb-1 text-gray-700">Model</span>
+            <select x-model="model" @change="persist()" class="px-3 py-2 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400">
+              <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+              <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+			  <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+			  <option value="gemini-2.0-pro">gemini-2.0-pro</option>
+			  <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+			  <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+            </select>
+          </label>
+          <label class="flex flex-col text-sm">
+            <span class="mb-1 text-gray-700">Temperature: <span x-text="temperature.toFixed(2)"></span></span>
+            <input type="range" min="0" max="1" step="0.05" x-model.number="temperature" @input="persist()" />
+          </label>
+        </div>
+
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button @click="resetConversation()" class="px-3 py-1.5 text-sm rounded-xl bg-gray-200 hover:bg-gray-300">Reset</button>
+          <button @click="exportChat()" class="px-3 py-1.5 text-sm rounded-xl bg-gray-200 hover:bg-gray-300">Export JSON</button>
+          <label class="px-3 py-1.5 text-sm rounded-xl bg-gray-200 hover:bg-gray-300 cursor-pointer">
+            Import JSON <input type="file" class="hidden" accept="application/json" @change="importChat($event)" />
+          </label>
+        </div>
+      </div>
+    </header>
+
+    <!-- Chat Window -->
+    <main class="w-full mt-4 flex-1 flex flex-col">
+      <div class="flex-1 overflow-y-auto rounded-2xl p-4 bg-white/80 backdrop-blur border border-gray-200 shadow-sm" x-ref="scroll">
+        <template x-if="messages.length === 0">
+          <div class="text-sm text-gray-500">No messages yet. Try asking: <code class="bg-gray-200 px-1.5 py-0.5 rounded">Give me 3 project ideas for beginners using Alpine.js</code></div>
+        </template>
+
+        <template x-for="(m, idx) in messages" :key="idx">
+          <div class="mb-4">
+            <div class="text-xs text-gray-500 mb-1" x-text="m.role === 'user' ? 'You' : 'Gemini'"></div>
+            <div :class="m.role === 'user' ? 'bg-indigo-50 border border-indigo-100' : 'bg-white border border-gray-200 text-gray-800'" class="whitespace-pre-wrap rounded-2xl px-4 py-3 shadow-sm">
+              <div x-html="renderMarkdown(m.content)"></div>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="loading">
+          <div class="flex items-center gap-2 text-sm text-gray-600">
+            <span class="inline-block h-2 w-2 rounded-full bg-gray-400 animate-pulse"></span>
+            <span>Gemini is thinking...</span>
+          </div>
+        </template>
+      </div>
+
+      <!-- Composer -->
+      <div class="mt-3">
+        <div class="bg-white/80 backdrop-blur border border-gray-200 shadow-sm rounded-2xl p-3">
+          <textarea x-model="userInput" @keydown.enter.prevent="send()" rows="3" placeholder="Type your message and press Enter..." class="w-full resize-y px-3 py-2 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-pink-400"></textarea>
+          <div class="mt-2 flex justify-between items-center">
+            <div class="text-xs text-gray-500">Your messages are saved locally (localStorage). API key is stored only in your browser.</div>
+            <button @click="send()" :disabled="!canSend" class="px-4 py-2 rounded-xl text-white disabled:opacity-60 bg-gradient-to-r from-[var(--gradient-from)] via-[var(--gradient-via)] to-[var(--gradient-to)] hover:opacity-95">Send</button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="w-full mt-4 text-xs text-gray-500">
+      <p>Tip: For teaching, have students deploy this single <code>index.html</code> to GitHub Pages or Netlify. Keep API keys private in real apps by proxying requests via a backend.</p>
+    </footer>
+  </div>
+
+  <script>
+    function chatApp() {
+      return {
+        // State
+        apiKey: '',
+        reveal: false,
+        model: 'gemini-1.5-flash',
+        temperature: 0.7,
+        messages: [], // [{role:'user'|'model', content:'...'}]
+        userInput: '',
+        loading: false,
+
+        get canSend() { return !!this.apiKey && !!this.userInput && !this.loading; },
+
+        init() {
+          // Restore from localStorage
+          try {
+            const saved = JSON.parse(localStorage.getItem('gemini-chat') || '{}');
+            if (saved) {
+              this.apiKey = saved.apiKey || '';
+              this.model = saved.model || this.model;
+              this.temperature = typeof saved.temperature === 'number' ? saved.temperature : this.temperature;
+              this.messages = Array.isArray(saved.messages) ? saved.messages : [];
+            }
+          } catch (e) {}
+
+          // Welcome message if empty
+          if (this.messages.length === 0) {
+            this.messages.push({ role: 'model', content: 'Hi! I\'m Gemini. Ask me anything about Alpine.js, front-end, or creative ideas. ✨' });
+          }
+
+          this.$nextTick(() => this.scrollToBottom());
+        },
+
+        persist() {
+          const payload = { apiKey: this.apiKey, model: this.model, temperature: this.temperature, messages: this.messages };
+          localStorage.setItem('gemini-chat', JSON.stringify(payload));
+        },
+
+        resetConversation() {
+          this.messages = [{ role: 'model', content: 'Conversation reset. What shall we talk about next?'}];
+          this.userInput = '';
+          this.persist();
+          this.$nextTick(() => this.scrollToBottom());
+        },
+
+        exportChat() {
+          const blob = new Blob([JSON.stringify({ messages: this.messages }, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = 'gemini-chat-export.json'; a.click();
+          URL.revokeObjectURL(url);
+        },
+
+        importChat(evt) {
+          const file = evt.target.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            try {
+              const data = JSON.parse(reader.result);
+              if (Array.isArray(data.messages)) {
+                this.messages = data.messages;
+                this.persist();
+                this.$nextTick(() => this.scrollToBottom());
+              }
+            } catch (e) { alert('Invalid JSON'); }
+          };
+          reader.readAsText(file);
+        },
+
+        async send() {
+          if (!this.canSend) return;
+          const userText = this.userInput.trim();
+          if (!userText) return;
+
+          // Push user message
+          this.messages.push({ role: 'user', content: userText });
+          this.userInput = '';
+          this.persist();
+          this.$nextTick(() => this.scrollToBottom());
+
+          // Build contents from history for Gemini
+          const contents = this.messages.map(m => ({
+            role: m.role === 'user' ? 'user' : 'model',
+            parts: [{ text: m.content }]
+          }));
+
+          // Add a short system-style instruction as the first turn, optional
+          if (!contents.find(c => c.role === 'user' || c.role === 'model')) {
+            contents.unshift({ role: 'user', parts: [{ text: 'You are a helpful assistant.' }] });
+          }
+
+          this.loading = true;
+          try {
+            const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${encodeURIComponent(this.apiKey)}`;
+            const res = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents,
+                generationConfig: {
+                  temperature: this.temperature,
+                }
+              })
+            });
+
+            const data = await res.json();
+            const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || (data?.promptFeedback?.blockReason ? `Blocked: ${data.promptFeedback.blockReason}` : 'No response');
+            this.messages.push({ role: 'model', content: text });
+          } catch (e) {
+            this.messages.push({ role: 'model', content: `Error: ${e.message}` });
+          } finally {
+            this.loading = false;
+            this.persist();
+            this.$nextTick(() => this.scrollToBottom());
+          }
+        },
+
+        renderMarkdown(text) {
+          // Minimal markdown-ish rendering for **bold**, *italic*, and code blocks
+          if (!text) return '';
+          let html = text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+          html = html.replace(/```([\s\S]*?)```/g, '<pre class="overflow-auto rounded-xl p-3 bg-black/80 text-white"><code>$1</code></pre>');
+          html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+          html = html.replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 rounded bg-gray-200 text-gray-800">$1</code>');
+          html = html.replace(/\n/g, '<br />');
+          return html;
+        },
+
+        scrollToBottom() {
+          const el = this.$refs.scroll;
+          if (!el) return;
+          el.scrollTop = el.scrollHeight;
+        }
+      };
+    }
+  </script>
+</body>
+</html>
